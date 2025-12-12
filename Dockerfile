@@ -32,8 +32,12 @@ RUN mkdir -p /app/logs
 ENV BOT_TOKEN=""
 ENV ALLOWED_USER_IDS="[]"
 ENV WEBAPP_URL=""
+ENV DOCKER_CONTAINER="true"
 
 # Bot starten
 WORKDIR /app/bot
-CMD ["python", "bot.py"]
+
+# Development Mode mit Hot Reload (wenn DOCKER_DEV=true)
+# Production Mode (Standard)
+CMD if [ "$DOCKER_DEV" = "true" ]; then python bot_dev.py; else python bot.py; fi
 

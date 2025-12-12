@@ -2,7 +2,7 @@
 services:
   bot:
     # Image von GHCR verwenden, falls verfügbar, sonst lokal bauen
-    image: ghcr.io/R0bes/Heimdial:latest
+    image: ghcr.io/r0bes/heimdial:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,11 +12,14 @@ services:
       - BOT_TOKEN=${BOT_TOKEN}
       - ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
       - WEBAPP_URL=${WEBAPP_URL}
+      - DOCKER_DEV=${DOCKER_DEV:-false}
     volumes:
       # Logs persistent speichern
       - ./logs:/app/logs
       # Bot-Logs
       - ./bot/bot.log:/app/bot/bot.log
+      # Source Code für Hot Reload (Development)
+      - ./bot:/app/bot
     # Logs direkt anzeigen
     logging:
       driver: "json-file"
