@@ -10,6 +10,8 @@ Telegram Bot mit Mini App zur Remote-Steuerung deines PCs via CI/CD.
 - 📊 Top Prozesse
 - 🌡️ CPU Temperature
 - 🧠 Memory Usage
+- 🏠 Host Info (Hostname & IP)
+- 📋 Bot Logs
 - 💻 Custom Shell Commands
 
 ## Architektur

@@ -14,6 +14,10 @@ bot/bot.pid
 bot/bot.log
 bot/*.log
 
+# Docker
+logs/
+*.log
+
 # IDE
 .vscode/
 .idea/

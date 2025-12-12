@@ -1,0 +1,22 @@
+---
+services:
+  bot:
+    build: .
+    container_name: heimdial-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
+      - WEBAPP_URL=${WEBAPP_URL}
+    volumes:
+      # Logs persistent speichern
+      - ./logs:/app/logs
+      # Bot-Logs
+      - ./bot/bot.log:/app/bot/bot.log
+    # Logs direkt anzeigen
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+

@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import platform
+import socket
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -17,21 +18,25 @@ IS_WINDOWS = platform.system() == "Windows"
 # Predefined Commands (platform-specific)
 if IS_WINDOWS:
     COMMANDS = {
+        'host_info': 'hostname && ipconfig | findstr IPv4',
         'system_info': 'systeminfo',
         'disk_space': 'wmic logicaldisk get size,freespace,caption',
         'uptime': 'net stats srv',
         'processes': 'tasklist /FO TABLE /SORT:CPU',
         'temp': 'wmic /namespace:\\\\root\\wmi PATH MSAcpi_ThermalZoneTemperature get CurrentTemperature',
-        'memory': 'wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /format:list'
+        'memory': 'wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /format:list',
+        'bot_logs': 'Get-Content bot.log -Tail 50 -ErrorAction SilentlyContinue'
     }
 else:
     COMMANDS = {
-        'system_info': 'neofetch',
+        'host_info': 'hostname && hostname -I',
+        'system_info': 'neofetch 2>/dev/null || (echo "=== System Info ===" && uname -a && echo "" && cat /etc/os-release)',
         'disk_space': 'df -h',
         'uptime': 'uptime',
         'processes': 'ps aux --sort=-%cpu | head -15',
-        'temp': 'sensors',
-        'memory': 'free -h'
+        'temp': 'sensors 2>/dev/null || echo "sensors not available"',
+        'memory': 'free -h',
+        'bot_logs': 'tail -50 bot.log 2>/dev/null || echo "No log file found"'
     }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43,13 +48,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"⚠️  Unauthorized access attempt: {user_id}", file=sys.stderr)
         return
     
+    # Host-Informationen sammeln
+    hostname = socket.gethostname()
+    try:
+        # Versuche lokale IP zu bekommen
+        if IS_WINDOWS:
+            result = subprocess.run(['ipconfig'], capture_output=True, text=True, timeout=5)
+            ip_lines = [line.strip() for line in result.stdout.split('\n') if 'IPv4' in line]
+            local_ip = ip_lines[0].split(':')[-1].strip() if ip_lines else "N/A"
+        else:
+            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5)
+            local_ip = result.stdout.strip().split()[0] if result.stdout.strip() else "N/A"
+    except:
+        try:
+            local_ip = socket.gethostbyname(hostname)
+        except:
+            local_ip = "N/A"
+    
+    os_name = platform.system()
+    os_release = platform.release()
+    
     keyboard = [
         [InlineKeyboardButton("🚀 Open Control Panel", web_app=WebAppInfo(url=WEBAPP_URL))]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    host_info = f"🖥️ Host: {hostname}\n💻 OS: {os_name} {os_release}\n🌐 IP: {local_ip}"
+    
     await update.message.reply_text(
-        f"✅ Bot aktiv!\nUser ID: {user_id}\n\nÖffne das Control Panel:",
+        f"✅ Bot aktiv!\nUser ID: {user_id}\n\n{host_info}\n\nÖffne das Control Panel:",
         reply_markup=reply_markup
     )
 
@@ -76,17 +103,31 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Feedback an User
         await update.message.reply_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown")
         
-        # Command ausführen
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        # Spezialbehandlung für bot_logs auf Windows (PowerShell)
+        if cmd_key == 'bot_logs' and IS_WINDOWS:
+            # PowerShell Command direkt ausführen
+            result = subprocess.run(
+                ['powershell', '-Command', cmd],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+        else:
+            # Command ausführen
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
         
         # Output zusammenstellen
         output = result.stdout if result.stdout else result.stderr
+        if not output and cmd_key == 'bot_logs':
+            output = "📋 No log entries yet. Bot is running."
         output = output[:4000] if output else "✅ Done (no output)"
         
         # Ergebnis senden
