@@ -129,10 +129,15 @@ chmod +x *.sh
 
 **Wähle eine Variante:**
 
-**Variante 1: Docker Deployment (Empfohlen)**
-- Workflow: `.github/workflows/deploy-bot-docker.yml`
-- Deployed automatisch in Docker bei jedem Push
-- Läuft auf self-hosted Runner mit Docker
+**Variante 1: Docker Deployment mit GHCR (Empfohlen)**
+- **Build Workflow**: `.github/workflows/build-docker-image.yml`
+  - Baut Docker Image automatisch bei Code-Änderungen
+  - Pusht Image zu GitHub Container Registry (GHCR)
+  - Läuft auf GitHub Servern (ubuntu-latest)
+- **Deploy Workflow**: `.github/workflows/deploy-bot-docker.yml`
+  - Pulled Image von GHCR (schneller als lokaler Build)
+  - Startet Container auf self-hosted Runner
+  - Fallback: Baut lokal, falls Image nicht verfügbar
 
 **Variante 2: Direktes Deployment**
 - Workflow: `.github/workflows/deploy-bot.yml`
