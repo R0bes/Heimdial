@@ -1,0 +1,55 @@
+name: Deploy Bot (Docker)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bot/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy-bot-docker.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check Docker
+        run: |
+          docker --version
+          docker-compose --version || docker compose version
+      
+      - name: Stop existing container
+        run: |
+          docker-compose down 2>&1 || docker compose down 2>&1 || true
+        continue-on-error: true
+      
+      - name: Build Docker image
+        run: |
+          docker-compose build --no-cache bot || docker compose build --no-cache bot
+      
+      - name: Start container
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
+          WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
+        run: |
+          docker-compose up -d bot || docker compose up -d bot
+      
+      - name: Verify container is running
+        run: |
+          sleep 5
+          if docker-compose ps | grep -q "heimdial-bot.*Up" || docker compose ps | grep -q "heimdial-bot.*Up"; then
+            echo "✅ Bot container is running"
+            docker-compose ps || docker compose ps
+          else
+            echo "❌ Bot container failed to start"
+            docker-compose logs bot || docker compose logs bot
+            exit 1
+          fi
+

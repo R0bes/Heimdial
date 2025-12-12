@@ -127,6 +127,17 @@ chmod +x *.sh
 
 #### Option B: Automatisches Deployment (Mit GitHub Actions Runner)
 
+**Wähle eine Variante:**
+
+**Variante 1: Docker Deployment (Empfohlen)**
+- Workflow: `.github/workflows/deploy-bot-docker.yml`
+- Deployed automatisch in Docker bei jedem Push
+- Läuft auf self-hosted Runner mit Docker
+
+**Variante 2: Direktes Deployment**
+- Workflow: `.github/workflows/deploy-bot.yml`
+- Deployed direkt auf dem System (ohne Docker)
+
 ### 6. Self-Hosted Runner einrichten (auf deinem PC)
 
 #### Windows
