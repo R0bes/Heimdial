@@ -1,15 +1,17 @@
 name: Deploy Bot (Docker)
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'bot/**'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
-      - '.github/workflows/deploy-bot-docker.yml'
+  # Nur manuell auslösen oder wenn explizit gewünscht
   workflow_dispatch:
+  # Push-Events deaktiviert, da kein Runner installiert ist
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'bot/**'
+  #     - 'Dockerfile'
+  #     - 'docker-compose.yml'
+  #     - '.github/workflows/deploy-bot-docker.yml'
 
 jobs:
   deploy:
