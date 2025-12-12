@@ -5,6 +5,10 @@ import sys
 import platform
 import socket
 import logging
+import signal
+import atexit
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -27,6 +31,21 @@ class FakeResult:
         self.stderr = stderr
         self.returncode = returncode
 
+def get_main_menu_keyboard():
+    """Erstellt das Hauptmenü mit Quick Actions"""
+    keyboard = [
+        [
+            InlineKeyboardButton("🖥️ System Info", callback_data="quick_system_info"),
+            InlineKeyboardButton("💾 Disk Space", callback_data="quick_disk_space")
+        ],
+        [
+            InlineKeyboardButton("🧠 Memory", callback_data="quick_memory"),
+            InlineKeyboardButton("📋 Bot Logs", callback_data="quick_bot_logs")
+        ],
+        [InlineKeyboardButton("🚀 Open Control Panel", web_app=WebAppInfo(url=WEBAPP_URL))]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # Predefined Commands (platform-specific)
 if IS_WINDOWS:
     COMMANDS = {
@@ -37,18 +56,18 @@ if IS_WINDOWS:
         'processes': 'tasklist /FO TABLE /SORT:CPU',
         'temp': 'wmic /namespace:\\\\root\\wmi PATH MSAcpi_ThermalZoneTemperature get CurrentTemperature',
         'memory': 'wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /format:list',
-        'bot_logs': 'Get-Content bot.log -Tail 50 -ErrorAction SilentlyContinue'
+        'bot_logs': 'Get-Content bot.log -Tail 20 -ErrorAction SilentlyContinue'
     }
 else:
     COMMANDS = {
         'host_info': 'hostname && hostname -I',
-        'system_info': 'neofetch 2>/dev/null || (echo "=== System Info ===" && uname -a && echo "" && cat /etc/os-release)',
+        'system_info': 'echo "=== System Info ===" && uname -a && echo "" && echo "Uptime:" && uptime -p 2>/dev/null || uptime && echo "" && echo "CPU:" && lscpu | grep "Model name" 2>/dev/null || echo "CPU: N/A" && echo "Memory:" && free -h | head -2',
         'disk_space': 'df -h',
         'uptime': 'uptime',
         'processes': 'ps aux --sort=-%cpu | head -15',
         'temp': 'sensors 2>/dev/null || echo "sensors not available"',
         'memory': 'free -h',
-        'bot_logs': 'tail -50 /app/bot/bot.log 2>/dev/null || tail -50 bot.log 2>/dev/null || echo "No log file found. Bot is running in Docker. Use: docker-compose logs bot"'
+        'bot_logs': 'tail -20 /app/bot/bot.log 2>/dev/null || tail -20 bot.log 2>/dev/null || echo "No log file found. Bot is running in Docker. Use: docker-compose logs bot"'
     }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -57,12 +76,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or "N/A"
     
+    # Finde Index des Users in ALLOWED_USER_IDS
+    try:
+        user_index = ALLOWED_USER_IDS.index(user_id)
+        match_status = f"Match: User[{user_index}]"
+    except ValueError:
+        match_status = "No Match"
+    
     if user_id not in ALLOWED_USER_IDS:
         await update.message.reply_text("❌ Unauthorized")
-        logger.warning(f"⚠️  Unauthorized access attempt from User ID: {user_id} (@{username})")
+        logger.warning(f"⚠️  Unauthorized access attempt from User ID: {user_id} (@{username}) - {match_status}")
         return
     
-    logger.info(f"✅ /start command from User ID: {user_id} (@{username})")
+    logger.info(f"✅ /start command from User ID: {user_id} (@{username}) - {match_status}")
     
     # Host-Informationen sammeln
     hostname = socket.gethostname()
@@ -100,10 +126,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
     
-    keyboard = [
-        [InlineKeyboardButton("🚀 Open Control Panel", web_app=WebAppInfo(url=WEBAPP_URL))]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Quick Actions Buttons (Hauptmenü)
+    reply_markup = get_main_menu_keyboard()
     
     # Host-Info zusammenstellen
     host_info_parts = [f"🖥️ Host: {hostname}"]
@@ -129,14 +153,30 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     username = update.effective_user.username or "N/A"
     
+    # Finde Index des Users in ALLOWED_USER_IDS
+    try:
+        user_index = ALLOWED_USER_IDS.index(user_id)
+        match_status = f"Match: User[{user_index}]"
+    except ValueError:
+        match_status = "No Match"
+    
     if user_id not in ALLOWED_USER_IDS:
-        logger.warning(f"⚠️  Unauthorized WebApp access from User ID: {user_id} (@{username})")
+        logger.warning(f"⚠️  Unauthorized WebApp access from User ID: {user_id} (@{username}) - {match_status}")
         return
     
     try:
-        logger.info(f"📱 WebApp data received from User ID: {user_id} (@{username})")
+        logger.info(f"📱 WebApp data received from User ID: {user_id} (@{username}) - {match_status}")
+        
+        # Prüfe ob WebApp Data vorhanden ist
+        if not update.effective_message or not update.effective_message.web_app_data:
+            logger.error("❌ No web_app_data in message")
+            await update.message.reply_text("❌ Keine Daten von der Mini App erhalten. Bitte versuche es erneut.", reply_markup=get_main_menu_keyboard())
+            return
+        
         # Parse WebApp Data
+        logger.debug(f"📱 Raw WebApp data: {update.effective_message.web_app_data.data}")
         data = json.loads(update.effective_message.web_app_data.data)
+        logger.debug(f"📱 Parsed WebApp data: {data}")
         cmd_key = data.get('command')
         
         # Bestimme Command
@@ -146,65 +186,17 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             cmd = COMMANDS.get(cmd_key, '')
         
         if not cmd:
-            await update.message.reply_text("❌ Unknown command")
+            await update.message.reply_text("❌ Unknown command", reply_markup=get_main_menu_keyboard())
             return
         
         # Feedback an User
         logger.info(f"⚙️  Executing command '{cmd_key}' from User ID: {user_id} (@{username})")
         logger.debug(f"Command: {cmd[:100]}...")
-        await update.message.reply_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown")
+        await update.message.reply_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
         
-        # Spezialbehandlung für bot_logs
-        if cmd_key == 'bot_logs':
-            # Prüfe ob wir in Docker laufen
-            if os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER'):
-                # In Docker: Log-Datei direkt lesen
-                log_paths = ['/app/bot/bot.log', 'bot.log', '/app/logs/bot.log']
-                output = None
-                for log_path in log_paths:
-                    if os.path.exists(log_path):
-                        try:
-                            with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                lines = f.readlines()
-                                output = ''.join(lines[-50:]) if len(lines) > 50 else ''.join(lines)
-                                break
-                        except:
-                            continue
-                
-                # Simuliere subprocess result
-                if output:
-                    result = FakeResult(output)
-                else:
-                    result = FakeResult('📋 Bot is running in Docker.\n\nTo view logs, use:\n  docker-compose logs -f bot\n\nOr check the logs directory.')
-            elif IS_WINDOWS:
-                # PowerShell Command direkt ausführen
-                result = subprocess.run(
-                    ['powershell', '-Command', cmd],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=os.path.dirname(os.path.abspath(__file__))
-                )
-            else:
-                # Linux: Command ausführen
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=os.path.dirname(os.path.abspath(__file__))
-                )
-        else:
-            # Command ausführen
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=os.path.dirname(os.path.abspath(__file__))
-            )
+        # Command asynchron ausführen (blockiert Event Loop nicht)
+        logger.info(f"🔄 Executing command asynchronously: {cmd_key}")
+        result = await run_command_async(cmd, cmd_key, cwd=os.path.dirname(os.path.abspath(__file__)))
         
         # Output zusammenstellen
         output = result.stdout if result.stdout else result.stderr
@@ -213,15 +205,100 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         output = output[:4000] if output else "✅ Done (no output)"
         
         # Ergebnis senden
-        logger.info(f"✅ Command '{cmd_key}' completed successfully")
-        await update.message.reply_text(f"```\n{output}\n```", parse_mode="Markdown")
+        output_length = len(output) if output else 0
+        logger.info(f"✅ Command '{cmd_key}' completed successfully (output: {output_length} chars)")
+        if output_length > 0:
+            logger.debug(f"Command output preview: {output[:200]}...")
+        await update.message.reply_text(
+            f"```\n{output}\n```", 
+            parse_mode="Markdown",
+            reply_markup=get_main_menu_keyboard()
+        )
         
     except subprocess.TimeoutExpired:
-        logger.warning(f"⏱️  Command '{cmd_key}' timed out after 30s")
-        await update.message.reply_text("❌ Timeout (>30s)")
+        logger.warning(f"⏱️  Command '{cmd_key}' timed out after 30s from User ID: {user_id} (@{username})")
+        await update.message.reply_text("❌ Timeout (>30s)", reply_markup=get_main_menu_keyboard())
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-        logger.error(f"❌ Command execution error: {e}", exc_info=True)
+        error_msg = str(e)
+        logger.error(f"❌ Command '{cmd_key}' execution error from User ID: {user_id} (@{username}): {error_msg}", exc_info=True)
+        await update.message.reply_text(f"❌ Error: {error_msg}", reply_markup=get_main_menu_keyboard())
+
+# Thread Pool für subprocess Commands (damit Event Loop nicht blockiert wird)
+executor = ThreadPoolExecutor(max_workers=2)
+
+async def run_command_async(cmd, cmd_key, cwd=None):
+    """Führt einen Command asynchron aus, ohne Event Loop zu blockieren"""
+    logger = logging.getLogger(__name__)
+    loop = asyncio.get_event_loop()
+    
+    def run_subprocess():
+        try:
+            if cmd_key == 'bot_logs':
+                if os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER'):
+                    log_paths = ['/app/bot/bot.log', 'bot.log', '/app/logs/bot.log']
+                    output = None
+                    for log_path in log_paths:
+                        if os.path.exists(log_path):
+                            try:
+                                with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    lines = f.readlines()
+                                    output = ''.join(lines[-20:]) if len(lines) > 20 else ''.join(lines)
+                                    break
+                            except:
+                                continue
+                    if not output:
+                        output = '📋 Bot is running in Docker.\n\nTo view logs, use:\n  docker-compose logs -f bot'
+                    return FakeResult(output)
+                elif IS_WINDOWS:
+                    return subprocess.run(
+                        ['powershell', '-Command', cmd],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd=cwd or os.path.dirname(os.path.abspath(__file__))
+                    )
+                else:
+                    return subprocess.run(
+                        cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd=cwd or os.path.dirname(os.path.abspath(__file__))
+                    )
+            else:
+                if IS_WINDOWS:
+                    return subprocess.run(
+                        ['powershell', '-Command', cmd],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd=cwd or os.path.dirname(os.path.abspath(__file__))
+                    )
+                else:
+                    return subprocess.run(
+                        cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd=cwd or os.path.dirname(os.path.abspath(__file__))
+                    )
+        except subprocess.TimeoutExpired as e:
+            logger.warning(f"⏱️  Command timed out: {cmd[:50]}...")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Command execution error: {e}", exc_info=True)
+            raise
+    
+    # Führe subprocess in Thread Pool aus
+    try:
+        result = await loop.run_in_executor(executor, run_subprocess)
+        return result
+    except subprocess.TimeoutExpired:
+        raise
+    except Exception as e:
+        raise
 
 def main():
     """Main Function"""
@@ -363,9 +440,112 @@ def main():
     # Application erstellen
     application = Application.builder().token(TOKEN).build()
     
+    # Callback Handler für Quick Actions
+    async def handle_quick_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler für Quick Action Buttons"""
+        logger = logging.getLogger(__name__)
+        query = update.callback_query
+        
+        if not query:
+            logger.error("❌ No callback query in update")
+            return
+        
+        logger.info(f"🔔 Callback query received: {query.data}")
+        await query.answer()
+        
+        user_id = query.from_user.id
+        username = query.from_user.username or "N/A"
+        
+        # Finde Index des Users
+        try:
+            user_index = ALLOWED_USER_IDS.index(user_id)
+            match_status = f"Match: User[{user_index}]"
+        except ValueError:
+            match_status = "No Match"
+        
+        if user_id not in ALLOWED_USER_IDS:
+            logger.warning(f"⚠️  Unauthorized quick action from User ID: {user_id} (@{username}) - {match_status}")
+            await query.edit_message_text("❌ Unauthorized", reply_markup=get_main_menu_keyboard())
+            return
+        
+        action = query.data
+        logger.info(f"⚡ Quick action '{action}' from User ID: {user_id} (@{username}) - {match_status}")
+        
+        # Mappe Quick Actions zu Commands
+        action_map = {
+            'quick_system_info': 'system_info',
+            'quick_disk_space': 'disk_space',
+            'quick_memory': 'memory',
+            'quick_bot_logs': 'bot_logs'
+        }
+        
+        cmd_key = action_map.get(action)
+        if not cmd_key:
+            await query.edit_message_text("❌ Unknown action", reply_markup=get_main_menu_keyboard())
+            return
+        
+        cmd = COMMANDS.get(cmd_key, '')
+        if not cmd:
+            await query.edit_message_text("❌ Command not found", reply_markup=get_main_menu_keyboard())
+            return
+        
+        # Command ausführen
+        try:
+            await query.edit_message_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+            
+            # Command asynchron ausführen (blockiert Event Loop nicht)
+            logger.info(f"🔄 Executing quick action command asynchronously: {cmd_key}")
+            result = await run_command_async(cmd, cmd_key, cwd=os.path.dirname(os.path.abspath(__file__)))
+            
+            output = result.stdout if result.stdout else result.stderr
+            if not output:
+                output = "✅ Done (no output)"
+            output = output[:4000] if output else "✅ Done (no output)"
+            
+            output_length = len(output) if output else 0
+            logger.info(f"✅ Quick action '{action}' completed successfully (output: {output_length} chars)")
+            
+            await query.edit_message_text(
+                f"```\n{output}\n```", 
+                parse_mode="Markdown",
+                reply_markup=get_main_menu_keyboard()
+            )
+            
+        except subprocess.TimeoutExpired:
+            logger.warning(f"⏱️  Quick action '{action}' timed out after 30s from User ID: {user_id} (@{username})")
+            await query.edit_message_text("❌ Timeout (>30s)", reply_markup=get_main_menu_keyboard())
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ Quick action '{action}' error from User ID: {user_id} (@{username}): {error_msg}", exc_info=True)
+            await query.edit_message_text(f"❌ Error: {error_msg}", reply_markup=get_main_menu_keyboard())
+    
+    # Debug: Alle Updates loggen
+    async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Loggt alle Updates für Debugging"""
+        logger = logging.getLogger(__name__)
+        user_id = update.effective_user.id if update.effective_user else "Unknown"
+        username = update.effective_user.username if update.effective_user and update.effective_user.username else "N/A"
+        
+        if update.message:
+            text = update.message.text or update.message.caption or "No text"
+            logger.info(f"📨 Message received: '{text[:50]}...' from User ID: {user_id} (@{username})")
+        if update.callback_query:
+            logger.info(f"🔔 Callback query received: '{update.callback_query.data}' from User ID: {user_id} (@{username})")
+        if update.edited_message:
+            logger.info(f"✏️  Edited message from User ID: {user_id} (@{username})")
+    
     # Handlers registrieren
+    # WICHTIG: CallbackQueryHandler muss VOR MessageHandler registriert werden!
+    from telegram.ext import CallbackQueryHandler
+    # Debug Handler zuerst (mit niedrigster Priorität, group=-1)
+    application.add_handler(MessageHandler(filters.ALL, log_all_updates), group=-1)
+    application.add_handler(CallbackQueryHandler(log_all_updates), group=-1)
+    
+    # Eigentliche Handler (group=0, default)
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(handle_quick_action))  # VOR MessageHandler!
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    logger.info("✅ Handlers registered: Debug (group=-1), /start, CallbackQuery, WebApp (group=0)")
     
     # Bot Start Info
     logger.info("=" * 60)
@@ -373,10 +553,80 @@ def main():
     logger.info(f"📱 WebApp URL: {WEBAPP_URL}")
     logger.info(f"👥 Allowed Users: {ALLOWED_USER_IDS}")
     logger.info(f"🖥️  Platform: {platform.system()} {platform.release()}")
+    logger.info(f"🐍 Python Version: {platform.python_version()}")
+    logger.info(f"📂 Working Directory: {os.getcwd()}")
     logger.info("=" * 60)
     
+    # Shutdown Handler
+    async def shutdown_handler_async():
+        """Async shutdown handler"""
+        logger.info("=" * 60)
+        logger.info("🛑 Bot shutdown initiated")
+        logger.info(f"📱 WebApp URL: {WEBAPP_URL}")
+        logger.info(f"👥 Allowed Users: {ALLOWED_USER_IDS}")
+        logger.info(f"🖥️  Platform: {platform.system()} {platform.release()}")
+        logger.info("=" * 60)
+        if application:
+            try:
+                await application.stop()
+                await application.shutdown()
+                logger.info("✅ Application stopped gracefully")
+            except Exception as e:
+                logger.error(f"❌ Error during shutdown: {e}", exc_info=True)
+    
+    def shutdown_handler(signum=None, frame=None):
+        """Synchronous wrapper for shutdown"""
+        if signum:
+            signal_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else f"Signal {signum}"
+            logger.info(f"📶 Received signal: {signal_name}")
+        
+        # Starte async shutdown
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Wenn Loop läuft, erstelle Task
+                loop.create_task(shutdown_handler_async())
+            else:
+                # Wenn Loop nicht läuft, führe aus
+                loop.run_until_complete(shutdown_handler_async())
+        except RuntimeError:
+            # Keine Event Loop vorhanden, erstelle neue
+            asyncio.run(shutdown_handler_async())
+    
+    # Signal Handler registrieren
+    import signal
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, shutdown_handler)
+    if hasattr(signal, 'SIGINT'):
+        signal.signal(signal.SIGINT, shutdown_handler)
+    
     # Polling starten
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        logger.info("🔄 Starting polling...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=None)
+    except KeyboardInterrupt:
+        logger.info("⌨️  Keyboard interrupt received")
+        import asyncio
+        try:
+            asyncio.run(shutdown_handler_async())
+        except RuntimeError:
+            # Event Loop läuft bereits, verwende create_task
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Kann nicht awaiten, da wir in sync context sind
+                # Application wird durch KeyboardInterrupt selbst gestoppt
+                pass
+    except Exception as e:
+        logger.error(f"❌ Fatal error in polling: {e}", exc_info=True)
+        import asyncio
+        try:
+            asyncio.run(shutdown_handler_async())
+        except RuntimeError:
+            # Event Loop läuft bereits
+            pass
+    finally:
+        logger.info("👋 Bot shutdown complete")
 
 if __name__ == '__main__':
     main()

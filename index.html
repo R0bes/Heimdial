@@ -116,10 +116,18 @@
         
         function sendCommand(cmd) {
             console.log('Sending command:', cmd);
-            tg.sendData(JSON.stringify({
+            const data = {
                 command: cmd,
                 timestamp: Date.now()
-            }));
+            };
+            console.log('Sending data:', data);
+            try {
+                tg.sendData(JSON.stringify(data));
+                console.log('Data sent successfully');
+            } catch (error) {
+                console.error('Error sending data:', error);
+                tg.showAlert('Fehler beim Senden: ' + error.message);
+            }
         }
         
         function sendCustomCommand() {
@@ -128,12 +136,25 @@
                 tg.showAlert('Bitte Command eingeben');
                 return;
             }
-            tg.sendData(JSON.stringify({
+            const data = {
                 command: 'custom',
                 custom_cmd: cmd,
                 timestamp: Date.now()
-            }));
+            };
+            console.log('Sending custom command:', data);
+            try {
+                tg.sendData(JSON.stringify(data));
+                console.log('Custom command sent successfully');
+            } catch (error) {
+                console.error('Error sending custom command:', error);
+                tg.showAlert('Fehler beim Senden: ' + error.message);
+            }
         }
+        
+        // Debug: WebApp Status loggen
+        console.log('Telegram WebApp initialized');
+        console.log('WebApp version:', tg.version);
+        console.log('WebApp platform:', tg.platform);
         
         // Theme-Anpassungen
         tg.setHeaderColor('bg_color');
