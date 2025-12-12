@@ -2,7 +2,7 @@
 services:
   bot:
     # Image von GHCR verwenden, falls verfügbar, sonst lokal bauen
-    image: ${DOCKER_IMAGE:-ghcr.io/R0bes/Heimdial:latest}
+    image: ghcr.io/R0bes/Heimdial:latest
     build:
       context: .
       dockerfile: Dockerfile

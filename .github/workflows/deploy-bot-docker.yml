@@ -36,19 +36,17 @@ jobs:
           docker-compose down 2>&1 || docker compose down 2>&1 || true
         continue-on-error: true
       
-      - name: Pull or build Docker image
-        id: image
+      - name: Pull Docker image from GHCR
+        id: pull
         run: |
-          IMAGE="ghcr.io/${{ github.repository }}:latest"
-          if docker pull "$IMAGE" 2>/dev/null; then
-            echo "✅ Pulled image from GHCR"
-            echo "image_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️ Image not found in GHCR, building locally..."
-            docker-compose build --no-cache bot || docker compose build --no-cache bot
-            echo "image_exists=false" >> $GITHUB_OUTPUT
-          fi
+          docker pull ghcr.io/${{ github.repository }}:latest
         continue-on-error: true
+      
+      - name: Build Docker image (if pull failed)
+        if: steps.pull.outcome == 'failure'
+        run: |
+          echo "⚠️ Image not found in GHCR, building locally..."
+          docker-compose build --no-cache bot || docker compose build --no-cache bot
       
       - name: Start container
         env:
