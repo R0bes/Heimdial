@@ -1,8 +1,9 @@
-name: Deploy Bot to Self-Hosted Runner
+name: Deploy Bot
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - 'bot/**'
       - '.github/workflows/deploy-bot.yml'
@@ -16,35 +17,46 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Setup Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'bot/requirements.txt'
       
       - name: Install dependencies
         run: |
           cd bot
-          pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Stop old bot instance
+      - name: Stop existing bot (Linux)
+        if: runner.os == 'Linux'
         run: |
           if [ -f bot/bot.pid ]; then
-            OLD_PID=$(cat bot/bot.pid)
-            if ps -p $OLD_PID > /dev/null 2>&1; then
-              echo "Stopping bot with PID $OLD_PID"
-              kill $OLD_PID
-              sleep 2
+            PID=$(cat bot/bot.pid)
+            if ps -p $PID > /dev/null 2>&1; then
+              kill $PID
+              echo "Stopped existing bot (PID: $PID)"
             fi
-            rm bot/bot.pid
+            rm -f bot/bot.pid
           fi
-          # Fallback: kill by process name
-          pkill -f "python.*bot.py" || true
-          sleep 2
+        continue-on-error: true
       
-      - name: Start new bot instance
+      - name: Stop existing bot (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path bot/bot.pid) {
+            $PID = Get-Content bot/bot.pid
+            $process = Get-Process -Id $PID -ErrorAction SilentlyContinue
+            if ($process) {
+              Stop-Process -Id $PID -Force
+              Write-Host "Stopped existing bot (PID: $PID)"
+            }
+            Remove-Item bot/bot.pid -ErrorAction SilentlyContinue
+          }
+        continue-on-error: true
+      
+      - name: Start bot (Linux)
+        if: runner.os == 'Linux'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
@@ -53,21 +65,55 @@ jobs:
           cd bot
           nohup python bot.py > bot.log 2>&1 &
           echo $! > bot.pid
-          sleep 3
+          echo "Bot started with PID: $(cat bot.pid)"
       
-      - name: Verify bot is running
+      - name: Start bot (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
+          WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
         run: |
+          cd bot
+          $process = Start-Process -FilePath "python" -ArgumentList "bot.py" -PassThru -NoNewWindow -RedirectStandardOutput "bot.log" -RedirectStandardError "bot.log"
+          $process.Id | Out-File -FilePath "bot.pid" -Encoding ASCII
+          Write-Host "Bot started with PID: $($process.Id)"
+      
+      - name: Verify bot is running (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sleep 2
           if [ -f bot/bot.pid ]; then
-            BOT_PID=$(cat bot/bot.pid)
-            if ps -p $BOT_PID > /dev/null 2>&1; then
-              echo "✅ Bot is running with PID $BOT_PID"
-              exit 0
+            PID=$(cat bot/bot.pid)
+            if ps -p $PID > /dev/null 2>&1; then
+              echo "✅ Bot is running (PID: $PID)"
             else
               echo "❌ Bot failed to start"
-              echo "--- Log output ---"
-              cat bot/bot.log
+              cat bot/bot.log || true
               exit 1
             fi
           else
-            echo "❌ PID file not found"
+            echo "❌ Bot PID file not found"
             exit 1
+          fi
+      
+      - name: Verify bot is running (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 2
+          if (Test-Path bot/bot.pid) {
+            $PID = Get-Content bot/bot.pid
+            $process = Get-Process -Id $PID -ErrorAction SilentlyContinue
+            if ($process) {
+              Write-Host "✅ Bot is running (PID: $PID)"
+            } else {
+              Write-Host "❌ Bot failed to start"
+              Get-Content bot/bot.log -ErrorAction SilentlyContinue
+              exit 1
+            }
+          } else {
+            Write-Host "❌ Bot PID file not found"
+            exit 1
+          }

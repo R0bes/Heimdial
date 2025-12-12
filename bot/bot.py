@@ -2,6 +2,7 @@ import os
 import json
 import subprocess
 import sys
+import platform
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -10,15 +11,28 @@ TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_USER_IDS = json.loads(os.getenv("ALLOWED_USER_IDS", "[]"))
 WEBAPP_URL = os.getenv("WEBAPP_URL")
 
-# Predefined Commands
-COMMANDS = {
-    'system_info': 'neofetch',
-    'disk_space': 'df -h',
-    'uptime': 'uptime',
-    'processes': 'ps aux --sort=-%cpu | head -15',
-    'temp': 'sensors',
-    'memory': 'free -h'
-}
+# Platform detection
+IS_WINDOWS = platform.system() == "Windows"
+
+# Predefined Commands (platform-specific)
+if IS_WINDOWS:
+    COMMANDS = {
+        'system_info': 'systeminfo',
+        'disk_space': 'wmic logicaldisk get size,freespace,caption',
+        'uptime': 'net stats srv',
+        'processes': 'tasklist /FO TABLE /SORT:CPU',
+        'temp': 'wmic /namespace:\\\\root\\wmi PATH MSAcpi_ThermalZoneTemperature get CurrentTemperature',
+        'memory': 'wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /format:list'
+    }
+else:
+    COMMANDS = {
+        'system_info': 'neofetch',
+        'disk_space': 'df -h',
+        'uptime': 'uptime',
+        'processes': 'ps aux --sort=-%cpu | head -15',
+        'temp': 'sensors',
+        'memory': 'free -h'
+    }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler für /start Command"""
@@ -76,9 +90,7 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         output = output[:4000] if output else "✅ Done (no output)"
         
         # Ergebnis senden
-        await update.message.reply_text(f"```
-{output}
-```", parse_mode="Markdown")
+        await update.message.reply_text(f"```\n{output}\n```", parse_mode="Markdown")
         
     except subprocess.TimeoutExpired:
         await update.message.reply_text("❌ Timeout (>30s)")
@@ -107,6 +119,13 @@ def main():
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
     
     # Info ausgeben
+    import sys
+    import io
+    # UTF-8 Encoding für Windows Console
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    
     print(f"🤖 Bot started successfully")
     print(f"📱 WebApp URL: {WEBAPP_URL}")
     print(f"👥 Allowed Users: {ALLOWED_USER_IDS}")

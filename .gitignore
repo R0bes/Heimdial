@@ -28,3 +28,5 @@ Thumbs.db
 # Secrets (falls lokal getestet wird)
 .env
 config.py
+# .env.example sollte committed werden
+!.env.example
