@@ -8,6 +8,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -64,12 +65,96 @@
             outline: none;
             border-color: var(--tg-theme-button-color, #3390ec);
         }
+        #main-panel {
+            display: block;
+        }
+        .result-container {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            display: none;
+        }
+        .result-container.active {
+            display: block;
+        }
+        .disk-item {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: var(--tg-theme-bg-color, #ffffff);
+            border-radius: 8px;
+        }
+        .disk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        .disk-mount {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #999999);
+            margin-top: 4px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background: var(--tg-theme-hint-color, #e0e0e0);
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50 0%, #FFC107 70%, #F44336 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .disk-stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: var(--tg-theme-hint-color, #999999);
+            margin-bottom: 4px;
+        }
+        .stat-value {
+            font-weight: 600;
+        }
+        .chart-container {
+            margin-top: 16px;
+            height: 200px;
+            position: relative;
+        }
+        .back-button {
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+        }
     </style>
 </head>
 <body>
-    <h1>🖥️ PC Control Panel</h1>
-    
-    <div class="grid">
+    <div id="main-panel">
+        <h1>🖥️ PC Control Panel</h1>
+        
+        <div class="grid">
         <button onclick="sendCommand('host_info')">
             🏠 Host Info
         </button>
@@ -105,6 +190,16 @@
     <button onclick="sendCustomCommand()" style="width: 100%;">
         💻 Execute Custom
     </button>
+    </div>
+
+    <div id="result-panel" class="result-container">
+        <h2 id="result-title">💾 Disk Space</h2>
+        <div id="disk-list"></div>
+        <div class="chart-container">
+            <canvas id="disk-chart"></canvas>
+        </div>
+        <button class="back-button" onclick="showMainPanel()">← Zurück</button>
+    </div>
 
     <script>
         let tg = window.Telegram.WebApp;
@@ -159,6 +254,207 @@
         // Theme-Anpassungen
         tg.setHeaderColor('bg_color');
         tg.setBackgroundColor('bg_color');
+
+        // Disk Space Rendering
+        let diskChart = null;
+
+        function showMainPanel() {
+            document.getElementById('main-panel').style.display = 'block';
+            document.getElementById('result-panel').classList.remove('active');
+            if (diskChart) {
+                diskChart.destroy();
+                diskChart = null;
+            }
+        }
+
+        function showDiskSpace(data) {
+            try {
+                // Parse JSON wenn es ein String ist
+                let diskData;
+                if (typeof data === 'string') {
+                    // Versuche JSON aus Markdown Code-Block zu extrahieren
+                    const jsonMatch = data.match(/```json\s*([\s\S]*?)\s*```/);
+                    if (jsonMatch) {
+                        diskData = JSON.parse(jsonMatch[1]);
+                    } else {
+                        // Versuche direkt zu parsen
+                        diskData = JSON.parse(data);
+                    }
+                } else {
+                    diskData = data;
+                }
+
+                if (diskData.type === 'disk_space' && diskData.disks) {
+                    document.getElementById('main-panel').style.display = 'none';
+                    document.getElementById('result-panel').classList.add('active');
+                    
+                    const diskList = document.getElementById('disk-list');
+                    diskList.innerHTML = '';
+                    
+                    const disks = diskData.disks;
+                    const chartData = {
+                        labels: [],
+                        used: [],
+                        avail: [],
+                        colors: []
+                    };
+                    
+                    disks.forEach((disk, index) => {
+                        // Disk Item erstellen
+                        const diskItem = document.createElement('div');
+                        diskItem.className = 'disk-item';
+                        
+                        const usePercent = disk.use_percent || 0;
+                        let color = '#4CAF50'; // Grün
+                        if (usePercent > 80) color = '#F44336'; // Rot
+                        else if (usePercent > 60) color = '#FFC107'; // Gelb
+                        
+                        diskItem.innerHTML = `
+                            <div class="disk-header">
+                                <span>${disk.filesystem}</span>
+                                <span>${usePercent.toFixed(1)}%</span>
+                            </div>
+                            <div class="disk-mount">${disk.mounted_on || ''}</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${usePercent}%; background: ${color};">
+                                    ${usePercent > 10 ? usePercent.toFixed(1) + '%' : ''}
+                                </div>
+                            </div>
+                            <div class="disk-stats">
+                                <div class="stat-item">
+                                    <div class="stat-label">Size</div>
+                                    <div class="stat-value">${disk.size}</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="stat-label">Used</div>
+                                    <div class="stat-value">${disk.used}</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="stat-label">Available</div>
+                                    <div class="stat-value">${disk.avail}</div>
+                                </div>
+                            </div>
+                        `;
+                        diskList.appendChild(diskItem);
+                        
+                        // Chart Daten sammeln (nur relevante Disks, keine tmpfs/dev)
+                        if (disk.size_bytes > 0 && 
+                            !disk.mounted_on.includes('/dev/') && 
+                            !disk.mounted_on.includes('/proc/') && 
+                            !disk.mounted_on.includes('/sys/') &&
+                            !disk.filesystem.startsWith('tmpfs') &&
+                            !disk.filesystem.startsWith('shm')) {
+                            const label = disk.filesystem.length > 15 ? disk.filesystem.substring(0, 15) + '...' : disk.filesystem;
+                            chartData.labels.push(label);
+                            chartData.used.push(disk.used_bytes);
+                            chartData.avail.push(disk.avail_bytes);
+                            chartData.colors.push(color);
+                        }
+                    });
+                    
+                    // Chart erstellen
+                    const ctx = document.getElementById('disk-chart').getContext('2d');
+                    if (diskChart) {
+                        diskChart.destroy();
+                    }
+                    
+                    if (chartData.labels.length > 0) {
+                        diskChart = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: chartData.labels,
+                                datasets: [
+                                    {
+                                        label: 'Used',
+                                        data: chartData.used,
+                                        backgroundColor: chartData.colors.map(c => c + '80'),
+                                        borderColor: chartData.colors,
+                                        borderWidth: 1
+                                    },
+                                    {
+                                        label: 'Available',
+                                        data: chartData.avail,
+                                        backgroundColor: '#E0E0E0',
+                                        borderColor: '#BDBDBD',
+                                        borderWidth: 1
+                                    }
+                                ]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                scales: {
+                                    x: {
+                                        stacked: true
+                                    },
+                                    y: {
+                                        stacked: true,
+                                        ticks: {
+                                            callback: function(value) {
+                                                if (value >= 1024**4) return (value / 1024**4).toFixed(1) + 'T';
+                                                if (value >= 1024**3) return (value / 1024**3).toFixed(1) + 'G';
+                                                if (value >= 1024**2) return (value / 1024**2).toFixed(1) + 'M';
+                                                return (value / 1024).toFixed(1) + 'K';
+                                            }
+                                        }
+                                    }
+                                },
+                                plugins: {
+                                    legend: {
+                                        display: true,
+                                        position: 'top'
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error rendering disk space:', error);
+                tg.showAlert('Fehler beim Anzeigen der Disk Space Daten: ' + error.message);
+            }
+        }
+
+        // Funktion zum Parsen von Bot-Nachrichten mit JSON-Daten
+        // Die Mini App kann die Bot-Nachricht nicht direkt lesen,
+        // aber der User kann die JSON kopieren und hier einfügen
+        // Oder wir zeigen eine Anleitung
+        
+        // Prüfe URL-Parameter für JSON-Daten (falls der Bot sie als Link sendet)
+        const urlParams = new URLSearchParams(window.location.search);
+        const jsonData = urlParams.get('data');
+        if (jsonData) {
+            try {
+                const parsed = JSON.parse(decodeURIComponent(jsonData));
+                if (parsed.type === 'disk_space') {
+                    showDiskSpace(parsed);
+                }
+            } catch (e) {
+                console.error('Error parsing URL data:', e);
+            }
+        }
+        
+        // Funktion zum manuellen Einfügen von JSON (für Testing)
+        window.pasteDiskData = function(jsonString) {
+            try {
+                const data = JSON.parse(jsonString);
+                showDiskSpace(data);
+            } catch (e) {
+                tg.showAlert('Ungültiges JSON Format: ' + e.message);
+            }
+        };
+        
+        // Wenn der User auf Disk Space klickt, zeige Anleitung
+        const originalSendCommand = sendCommand;
+        sendCommand = function(cmd) {
+            originalSendCommand(cmd);
+            if (cmd === 'disk_space') {
+                console.log('Disk space command sent. The bot will respond with JSON data.');
+                console.log('To view the visualization, copy the JSON from the bot message and call: window.pasteDiskData(jsonString)');
+                // Zeige eine Info-Nachricht
+                tg.showAlert('Der Bot sendet die Disk Space Daten als JSON. Kopiere die JSON aus der Bot-Nachricht und füge sie in die Konsole ein: window.pasteDiskData(jsonString)');
+            }
+        };
     </script>
 </body>
 </html>

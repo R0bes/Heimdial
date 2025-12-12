@@ -8,8 +8,10 @@ import logging
 import signal
 import atexit
 import asyncio
+import re
+from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Logging konfigurieren (wird in main() überschrieben, aber hier initialisiert)
@@ -31,12 +33,104 @@ class FakeResult:
         self.stderr = stderr
         self.returncode = returncode
 
+def parse_disk_space(df_output):
+    """Parst `df -h` Output und gibt strukturierte JSON-Daten zurück"""
+    disks = []
+    lines = df_output.strip().split('\n')
+    
+    # Überspringe Header-Zeile
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        
+        # Parse Zeile: Filesystem Size Used Avail Use% Mounted on
+        parts = line.split()
+        if len(parts) >= 6:
+            filesystem = parts[0]
+            size_str = parts[1]
+            used_str = parts[2]
+            avail_str = parts[3]
+            use_pct_str = parts[4].rstrip('%')
+            mounted_on = ' '.join(parts[5:]) if len(parts) > 5 else ''
+            
+            # Konvertiere Größen zu Bytes (für Charts)
+            def parse_size(size_str):
+                """Konvertiert Größen wie '1007G', '74G' zu Bytes"""
+                if not size_str or size_str == '-':
+                    return 0
+                size_str = size_str.upper()
+                multipliers = {'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}
+                for suffix, mult in multipliers.items():
+                    if size_str.endswith(suffix):
+                        num = float(size_str[:-1])
+                        return int(num * mult)
+                # Fallback: versuche als Zahl zu parsen
+                try:
+                    return int(float(size_str))
+                except:
+                    return 0
+            
+            size_bytes = parse_size(size_str)
+            used_bytes = parse_size(used_str)
+            avail_bytes = parse_size(avail_str)
+            
+            try:
+                use_pct = float(use_pct_str)
+            except:
+                use_pct = 0.0
+            
+            disks.append({
+                'filesystem': filesystem,
+                'size': size_str,
+                'used': used_str,
+                'avail': avail_str,
+                'use_percent': use_pct,
+                'mounted_on': mounted_on,
+                'size_bytes': size_bytes,
+                'used_bytes': used_bytes,
+                'avail_bytes': avail_bytes
+            })
+    
+    return disks
+
 def get_main_menu_keyboard():
-    """Erstellt das Hauptmenü mit Quick Actions"""
+    """Erstellt das Hauptmenü mit Quick Actions als ReplyKeyboard (für WebApp)"""
     keyboard = [
         [
-            InlineKeyboardButton("🖥️ System Info", callback_data="quick_system_info"),
-            InlineKeyboardButton("💾 Disk Space", callback_data="quick_disk_space")
+            KeyboardButton("🏠 Host Info"),
+            KeyboardButton("🖥️ System Info")
+        ],
+        [
+            KeyboardButton("💾 Disk Space"),
+            KeyboardButton("🔄 Uptime")
+        ],
+        [
+            KeyboardButton("📈 Top Prozesse"),
+            KeyboardButton("🌡️ Temperature")
+        ],
+        [
+            KeyboardButton("🧠 Memory"),
+            KeyboardButton("📋 Bot Logs")
+        ],
+        # WICHTIG: KeyboardButton für WebApp (nicht InlineKeyboardButton), damit sendData funktioniert
+        [KeyboardButton("🚀 Open Control Panel", web_app=WebAppInfo(url=WEBAPP_URL))]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+
+def get_inline_menu_keyboard():
+    """Erstellt das Hauptmenü mit Quick Actions als InlineKeyboard (für CallbackQueries)"""
+    keyboard = [
+        [
+            InlineKeyboardButton("🏠 Host Info", callback_data="quick_host_info"),
+            InlineKeyboardButton("🖥️ System Info", callback_data="quick_system_info")
+        ],
+        [
+            InlineKeyboardButton("💾 Disk Space", callback_data="quick_disk_space"),
+            InlineKeyboardButton("🔄 Uptime", callback_data="quick_uptime")
+        ],
+        [
+            InlineKeyboardButton("📈 Top Prozesse", callback_data="quick_processes"),
+            InlineKeyboardButton("🌡️ Temperature", callback_data="quick_temp")
         ],
         [
             InlineKeyboardButton("🧠 Memory", callback_data="quick_memory"),
@@ -150,6 +244,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler für WebApp Data (Commands von Mini App)"""
     logger = logging.getLogger(__name__)
+    logger.info("🔔 handle_webapp_data called!")
+    
+    # Prüfe verschiedene Update-Typen
+    if update.message and update.message.web_app_data:
+        logger.info(f"📱 WebApp data found in update.message")
+        message = update.message
+    elif update.effective_message and update.effective_message.web_app_data:
+        logger.info(f"📱 WebApp data found in update.effective_message")
+        message = update.effective_message
+    else:
+        logger.error(f"❌ No web_app_data found in update. Update type: {type(update)}")
+        logger.error(f"❌ Update has message: {update.message is not None}")
+        logger.error(f"❌ Update has effective_message: {update.effective_message is not None}")
+        if update.message:
+            logger.error(f"❌ Message has web_app_data: {hasattr(update.message, 'web_app_data')}")
+        return
+    
     user_id = update.effective_user.id
     username = update.effective_user.username or "N/A"
     
@@ -167,16 +278,11 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         logger.info(f"📱 WebApp data received from User ID: {user_id} (@{username}) - {match_status}")
         
-        # Prüfe ob WebApp Data vorhanden ist
-        if not update.effective_message or not update.effective_message.web_app_data:
-            logger.error("❌ No web_app_data in message")
-            await update.message.reply_text("❌ Keine Daten von der Mini App erhalten. Bitte versuche es erneut.", reply_markup=get_main_menu_keyboard())
-            return
-        
         # Parse WebApp Data
-        logger.debug(f"📱 Raw WebApp data: {update.effective_message.web_app_data.data}")
-        data = json.loads(update.effective_message.web_app_data.data)
-        logger.debug(f"📱 Parsed WebApp data: {data}")
+        web_app_data = message.web_app_data
+        logger.info(f"📱 Raw WebApp data: {web_app_data.data}")
+        data = json.loads(web_app_data.data)
+        logger.info(f"📱 Parsed WebApp data: {data}")
         cmd_key = data.get('command')
         
         # Bestimme Command
@@ -186,13 +292,13 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             cmd = COMMANDS.get(cmd_key, '')
         
         if not cmd:
-            await update.message.reply_text("❌ Unknown command", reply_markup=get_main_menu_keyboard())
+            await message.reply_text("❌ Unknown command", reply_markup=get_main_menu_keyboard())
             return
         
         # Feedback an User
         logger.info(f"⚙️  Executing command '{cmd_key}' from User ID: {user_id} (@{username})")
         logger.debug(f"Command: {cmd[:100]}...")
-        await update.message.reply_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+        await message.reply_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
         
         # Command asynchron ausführen (blockiert Event Loop nicht)
         logger.info(f"🔄 Executing command asynchronously: {cmd_key}")
@@ -202,6 +308,34 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         output = result.stdout if result.stdout else result.stderr
         if not output and cmd_key == 'bot_logs':
             output = "📋 No log entries yet. Bot is running."
+        
+        # Spezielle Behandlung für disk_space: JSON für WebApp, Text für Telegram
+        if cmd_key == 'disk_space' and output:
+            try:
+                disks = parse_disk_space(output)
+                # Sende JSON-Daten für WebApp (wird in der App gerendert)
+                json_data = json.dumps({'type': 'disk_space', 'disks': disks}, indent=2)
+                
+                # Sende sowohl JSON (für App) als auch Text (für Telegram Chat)
+                # Erstelle einen Link zur Mini App mit den Daten als URL-Parameter
+                encoded_data = quote(json_data)
+                webapp_url_with_data = f"{WEBAPP_URL}?data={encoded_data}"
+                
+                # Sende JSON + Link zur Visualisierung
+                await message.reply_text(
+                    f"💾 **Disk Space**\n\n"
+                    f"📊 [Visualisierung in der App öffnen]({webapp_url_with_data})\n\n"
+                    f"```json\n{json_data}\n```",
+                    parse_mode="Markdown",
+                    reply_markup=get_main_menu_keyboard()
+                )
+                logger.info(f"✅ Disk space data sent as JSON ({len(disks)} disks) with visualization link")
+                return
+            except Exception as e:
+                logger.error(f"❌ Error parsing disk space: {e}", exc_info=True)
+                # Fallback zu normalem Text-Output
+                pass
+        
         output = output[:4000] if output else "✅ Done (no output)"
         
         # Ergebnis senden
@@ -209,7 +343,7 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.info(f"✅ Command '{cmd_key}' completed successfully (output: {output_length} chars)")
         if output_length > 0:
             logger.debug(f"Command output preview: {output[:200]}...")
-        await update.message.reply_text(
+        await message.reply_text(
             f"```\n{output}\n```", 
             parse_mode="Markdown",
             reply_markup=get_main_menu_keyboard()
@@ -465,7 +599,7 @@ def main():
         
         if user_id not in ALLOWED_USER_IDS:
             logger.warning(f"⚠️  Unauthorized quick action from User ID: {user_id} (@{username}) - {match_status}")
-            await query.edit_message_text("❌ Unauthorized", reply_markup=get_main_menu_keyboard())
+            await query.edit_message_text("❌ Unauthorized", reply_markup=get_inline_menu_keyboard())
             return
         
         action = query.data
@@ -473,25 +607,29 @@ def main():
         
         # Mappe Quick Actions zu Commands
         action_map = {
+            'quick_host_info': 'host_info',
             'quick_system_info': 'system_info',
             'quick_disk_space': 'disk_space',
+            'quick_uptime': 'uptime',
+            'quick_processes': 'processes',
+            'quick_temp': 'temp',
             'quick_memory': 'memory',
             'quick_bot_logs': 'bot_logs'
         }
         
         cmd_key = action_map.get(action)
         if not cmd_key:
-            await query.edit_message_text("❌ Unknown action", reply_markup=get_main_menu_keyboard())
+            await query.edit_message_text("❌ Unknown action", reply_markup=get_inline_menu_keyboard())
             return
         
         cmd = COMMANDS.get(cmd_key, '')
         if not cmd:
-            await query.edit_message_text("❌ Command not found", reply_markup=get_main_menu_keyboard())
+            await query.edit_message_text("❌ Command not found", reply_markup=get_inline_menu_keyboard())
             return
         
         # Command ausführen
         try:
-            await query.edit_message_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+            await query.edit_message_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_inline_menu_keyboard())
             
             # Command asynchron ausführen (blockiert Event Loop nicht)
             logger.info(f"🔄 Executing quick action command asynchronously: {cmd_key}")
@@ -513,11 +651,11 @@ def main():
             
         except subprocess.TimeoutExpired:
             logger.warning(f"⏱️  Quick action '{action}' timed out after 30s from User ID: {user_id} (@{username})")
-            await query.edit_message_text("❌ Timeout (>30s)", reply_markup=get_main_menu_keyboard())
+            await query.edit_message_text("❌ Timeout (>30s)", reply_markup=get_inline_menu_keyboard())
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ Quick action '{action}' error from User ID: {user_id} (@{username}): {error_msg}", exc_info=True)
-            await query.edit_message_text(f"❌ Error: {error_msg}", reply_markup=get_main_menu_keyboard())
+            await query.edit_message_text(f"❌ Error: {error_msg}", reply_markup=get_inline_menu_keyboard())
     
     # Debug: Alle Updates loggen
     async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -529,6 +667,14 @@ def main():
         if update.message:
             text = update.message.text or update.message.caption or "No text"
             logger.info(f"📨 Message received: '{text[:50]}...' from User ID: {user_id} (@{username})")
+            # Prüfe ob WebApp Data vorhanden ist
+            if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
+                logger.info(f"📱 WebApp data detected in message: {update.message.web_app_data.data}")
+                logger.info(f"📱 WebApp data type: {type(update.message.web_app_data)}")
+            else:
+                logger.debug(f"📨 Message has no web_app_data attribute or it's None")
+            # Prüfe alle Attribute der Message
+            logger.debug(f"📨 Message attributes: {dir(update.message)}")
         if update.callback_query:
             logger.info(f"🔔 Callback query received: '{update.callback_query.data}' from User ID: {user_id} (@{username})")
         if update.edited_message:
@@ -541,10 +687,90 @@ def main():
     application.add_handler(MessageHandler(filters.ALL, log_all_updates), group=-1)
     application.add_handler(CallbackQueryHandler(log_all_updates), group=-1)
     
+    # Handler für Text-Nachrichten von ReplyKeyboard Buttons
+    async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler für Text-Nachrichten von ReplyKeyboard Buttons"""
+        logger = logging.getLogger(__name__)
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "N/A"
+        
+        # Finde Index des Users
+        try:
+            user_index = ALLOWED_USER_IDS.index(user_id)
+            match_status = f"Match: User[{user_index}]"
+        except ValueError:
+            match_status = "No Match"
+        
+        if user_id not in ALLOWED_USER_IDS:
+            logger.warning(f"⚠️  Unauthorized text message from User ID: {user_id} (@{username}) - {match_status}")
+            return
+        
+        text = update.message.text
+        logger.info(f"📨 Text message received: '{text}' from User ID: {user_id} (@{username}) - {match_status}")
+        
+        # Mappe Button-Text zu Commands
+        text_to_command = {
+            '🏠 Host Info': 'host_info',
+            '🖥️ System Info': 'system_info',
+            '💾 Disk Space': 'disk_space',
+            '🔄 Uptime': 'uptime',
+            '📈 Top Prozesse': 'processes',
+            '🌡️ Temperature': 'temp',
+            '🧠 Memory': 'memory',
+            '📋 Bot Logs': 'bot_logs'
+        }
+        
+        cmd_key = text_to_command.get(text)
+        if not cmd_key:
+            # Nicht ein bekannter Button, ignoriere oder zeige Hilfe
+            await update.message.reply_text(
+                "❌ Unbekannter Befehl. Bitte verwende die Buttons oder öffne das Control Panel.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        cmd = COMMANDS.get(cmd_key, '')
+        if not cmd:
+            await update.message.reply_text("❌ Command not found", reply_markup=get_main_menu_keyboard())
+            return
+        
+        # Command ausführen (gleiche Logik wie bei Quick Actions)
+        try:
+            await update.message.reply_text(f"⚙️ Running: `{cmd}`", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+            
+            logger.info(f"🔄 Executing command from text button asynchronously: {cmd_key}")
+            result = await run_command_async(cmd, cmd_key, cwd=os.path.dirname(os.path.abspath(__file__)))
+            
+            output = result.stdout if result.stdout else result.stderr
+            if not output:
+                output = "✅ Done (no output)"
+            output = output[:4000] if output else "✅ Done (no output)"
+            
+            output_length = len(output) if output else 0
+            logger.info(f"✅ Command '{cmd_key}' from text button completed successfully (output: {output_length} chars)")
+            
+            await update.message.reply_text(
+                f"```\n{output}\n```",
+                parse_mode="Markdown",
+                reply_markup=get_main_menu_keyboard()
+            )
+            
+        except subprocess.TimeoutExpired:
+            logger.warning(f"⏱️  Command '{cmd_key}' timed out after 30s from User ID: {user_id} (@{username})")
+            await update.message.reply_text("❌ Timeout (>30s)", reply_markup=get_main_menu_keyboard())
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ Command '{cmd_key}' execution error from User ID: {user_id} (@{username}): {error_msg}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {error_msg}", reply_markup=get_main_menu_keyboard())
+    
     # Eigentliche Handler (group=0, default)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_quick_action))  # VOR MessageHandler!
+    # Text-Message Handler für ReplyKeyboard Buttons (muss VOR WebApp Handler sein)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+    # WebApp Data Handler - muss explizit auf WEB_APP_DATA filtern
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    logger.info("✅ Handlers registered: /start, CallbackQuery, Text Messages, WebApp Data")
     logger.info("✅ Handlers registered: Debug (group=-1), /start, CallbackQuery, WebApp (group=0)")
     
     # Bot Start Info
