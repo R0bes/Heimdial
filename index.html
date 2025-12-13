@@ -10,46 +10,195 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+        
+        :root {
+            --primary: var(--tg-theme-button-color, #3390ec);
+            --primary-text: var(--tg-theme-button-text-color, #ffffff);
+            --bg: var(--tg-theme-bg-color, #ffffff);
+            --secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            --text: var(--tg-theme-text-color, #000000);
+            --hint: var(--tg-theme-hint-color, #999999);
+            --link: var(--tg-theme-link-color, #3390ec);
+            --border: rgba(0, 0, 0, 0.1);
+        }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             padding: 20px;
-            background: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--bg) 0%, var(--secondary-bg) 100%);
+            transition: all 0.3s ease;
         }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+            animation: fadeInDown 0.5s ease;
+        }
+        
         h1 {
-            margin-bottom: 24px;
-            font-size: 24px;
-            font-weight: 600;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--primary) 0%, #6c5ce7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
+        
+        .subtitle {
+            color: var(--hint);
+            font-size: 14px;
+            font-weight: 400;
+        }
+        
         h2 {
             margin-top: 32px;
-            margin-bottom: 12px;
-            font-size: 18px;
+            margin-bottom: 16px;
+            font-size: 20px;
             font-weight: 600;
+            color: var(--text);
         }
+        
         .grid {
             display: grid;
+            grid-template-columns: repeat(2, 1fr);
             gap: 12px;
+            margin-bottom: 24px;
+            animation: fadeInUp 0.6s ease;
         }
-        button {
-            padding: 16px;
-            font-size: 16px;
-            border-radius: 12px;
+        
+        .button {
+            padding: 18px 16px;
+            font-size: 15px;
+            border-radius: 16px;
             border: none;
-            background: var(--tg-theme-button-color, #3390ec);
-            color: var(--tg-theme-button-text-color, #ffffff);
+            background: var(--primary);
+            color: var(--primary-text);
             cursor: pointer;
             text-align: left;
-            transition: opacity 0.2s;
             font-weight: 500;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
         }
-        button:active {
-            opacity: 0.7;
+        
+        .button::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .button:active::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .button-icon {
+            font-size: 20px;
+            margin-right: 8px;
+            display: inline-block;
+            transition: transform 0.3s ease;
+        }
+        
+        .button:hover .button-icon {
+            transform: scale(1.1) rotate(5deg);
+        }
+        
+        .custom-section {
+            background: var(--secondary-bg);
+            padding: 20px;
+            border-radius: 20px;
+            margin-top: 24px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+            animation: fadeInUp 0.7s ease;
+        }
+        
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            margin: 12px 0;
+            border-radius: 12px;
+            border: 2px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 15px;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(51, 144, 236, 0.1);
+            transform: translateY(-1px);
+        }
+        
+        input::placeholder {
+            color: var(--hint);
+        }
+        
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        
+        .loading {
+            animation: pulse 1.5s ease-in-out infinite;
         }
         input {
             width: 100%;
@@ -67,138 +216,283 @@
         }
         #main-panel {
             display: block;
+            animation: fadeIn 0.5s ease;
         }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
         .result-container {
             margin-top: 20px;
-            padding: 16px;
-            border-radius: 12px;
-            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 24px;
+            border-radius: 24px;
+            background: var(--secondary-bg);
             display: none;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            animation: slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
         .result-container.active {
             display: block;
         }
+        
         .disk-item {
-            margin-bottom: 16px;
-            padding: 12px;
-            background: var(--tg-theme-bg-color, #ffffff);
-            border-radius: 8px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: var(--bg);
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            border: 1px solid var(--border);
         }
+        
+        .disk-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        }
+        
         .disk-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
             font-weight: 600;
+            font-size: 16px;
         }
+        
         .disk-mount {
-            font-size: 12px;
-            color: var(--tg-theme-hint-color, #999999);
-            margin-top: 4px;
+            font-size: 13px;
+            color: var(--hint);
+            margin-top: 6px;
+            font-weight: 400;
         }
+        
         .progress-bar {
             width: 100%;
-            height: 24px;
-            background: var(--tg-theme-hint-color, #e0e0e0);
-            border-radius: 12px;
+            height: 32px;
+            background: var(--secondary-bg);
+            border-radius: 16px;
             overflow: hidden;
-            margin: 8px 0;
+            margin: 12px 0;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: relative;
         }
+        
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #4CAF50 0%, #FFC107 70%, #F44336 100%);
-            transition: width 0.3s ease;
+            background: linear-gradient(90deg, #4CAF50 0%, #8BC34A 50%, #FFC107 70%, #FF9800 85%, #F44336 100%);
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+            position: relative;
+            overflow: hidden;
         }
+        
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+        
         .disk-stats {
             display: flex;
             justify-content: space-between;
             font-size: 14px;
-            margin-top: 8px;
+            margin-top: 12px;
+            gap: 8px;
         }
+        
         .stat-item {
             text-align: center;
+            flex: 1;
+            padding: 8px;
+            background: var(--secondary-bg);
+            border-radius: 10px;
+            transition: all 0.3s ease;
         }
+        
+        .stat-item:hover {
+            background: var(--primary);
+            color: var(--primary-text);
+            transform: scale(1.05);
+        }
+        
         .stat-label {
             font-size: 11px;
-            color: var(--tg-theme-hint-color, #999999);
+            color: var(--hint);
             margin-bottom: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
+        
+        .stat-item:hover .stat-label {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
         .stat-value {
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 15px;
         }
+        
         .chart-container {
-            margin-top: 16px;
-            height: 200px;
+            margin-top: 24px;
+            height: 250px;
             position: relative;
+            background: var(--bg);
+            padding: 16px;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
+        
         .back-button {
-            margin-top: 16px;
-            padding: 12px;
-            background: var(--tg-theme-button-color, #3390ec);
-            color: var(--tg-theme-button-text-color, #ffffff);
+            margin-top: 24px;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, #6c5ce7 100%);
+            color: var(--primary-text);
             border: none;
-            border-radius: 8px;
+            border-radius: 16px;
             cursor: pointer;
             width: 100%;
             font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(51, 144, 236, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .back-button::before {
+            content: '←';
+            margin-right: 8px;
+            transition: transform 0.3s ease;
+        }
+        
+        .back-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(51, 144, 236, 0.4);
+        }
+        
+        .back-button:active {
+            transform: translateY(0);
+        }
+        
+        .back-button:hover::before {
+            transform: translateX(-4px);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--hint);
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
         }
     </style>
 </head>
 <body>
     <div id="main-panel">
-        <h1>🖥️ PC Control Panel</h1>
+        <div class="header">
+            <h1>🖥️ PC Control Panel</h1>
+            <div class="subtitle">System Management & Monitoring</div>
+        </div>
         
         <div class="grid">
-        <button onclick="sendCommand('host_info')">
-            🏠 Host Info
-        </button>
-        <button onclick="sendCommand('system_info')">
-            🖥️ System Info
-        </button>
-        <button onclick="sendCommand('disk_space')">
-            💾 Disk Space
-        </button>
-        <button onclick="sendCommand('uptime')">
-            🔄 Uptime
-        </button>
-        <button onclick="sendCommand('processes')">
-            📈 Top Prozesse
-        </button>
-        <button onclick="sendCommand('temp')">
-            🌡️ Temperature
-        </button>
-        <button onclick="sendCommand('memory')">
-            🧠 Memory Usage
-        </button>
-        <button onclick="sendCommand('bot_logs')">
-            📋 Bot Logs
-        </button>
-    </div>
+            <button class="button" onclick="sendCommand('host_info')">
+                <span class="button-icon">🏠</span>
+                Host Info
+            </button>
+            <button class="button" onclick="sendCommand('system_info')">
+                <span class="button-icon">🖥️</span>
+                System Info
+            </button>
+            <button class="button" onclick="sendCommand('disk_space')">
+                <span class="button-icon">💾</span>
+                Disk Space
+            </button>
+            <button class="button" onclick="sendCommand('uptime')">
+                <span class="button-icon">🔄</span>
+                Uptime
+            </button>
+            <button class="button" onclick="sendCommand('processes')">
+                <span class="button-icon">📈</span>
+                Top Prozesse
+            </button>
+            <button class="button" onclick="sendCommand('temp')">
+                <span class="button-icon">🌡️</span>
+                Temperature
+            </button>
+            <button class="button" onclick="sendCommand('memory')">
+                <span class="button-icon">🧠</span>
+                Memory Usage
+            </button>
+            <button class="button" onclick="sendCommand('bot_logs')">
+                <span class="button-icon">📋</span>
+                Bot Logs
+            </button>
+        </div>
 
-    <h2>Custom Command</h2>
-    <input 
-        type="text" 
-        id="customCmd" 
-        placeholder="z.B. ls -la /home"
-    >
-    <button onclick="sendCustomCommand()" style="width: 100%;">
-        💻 Execute Custom
-    </button>
+        <div class="custom-section">
+            <h2>💻 Custom Command</h2>
+            <input 
+                type="text" 
+                id="customCmd" 
+                placeholder="z.B. ls -la /home"
+            >
+            <button class="button" onclick="sendCustomCommand()" style="width: 100%; margin-top: 8px;">
+                <span class="button-icon">⚡</span>
+                Execute Custom Command
+            </button>
+        </div>
     </div>
 
     <div id="result-panel" class="result-container">
-        <h2 id="result-title">💾 Disk Space</h2>
-        <div id="disk-list"></div>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+            <h2 id="result-title" style="margin: 0;">💾 Disk Space</h2>
+            <div style="font-size: 12px; color: var(--hint);">Real-time</div>
+        </div>
+        <div id="disk-list">
+            <div class="empty-state">
+                <div class="empty-state-icon">💾</div>
+                <div>Loading disk information...</div>
+            </div>
+        </div>
         <div class="chart-container">
             <canvas id="disk-chart"></canvas>
         </div>
-        <button class="back-button" onclick="showMainPanel()">← Zurück</button>
+        <button class="back-button" onclick="showMainPanel()">Zurück zum Hauptmenü</button>
     </div>
 
     <script>
@@ -291,6 +585,11 @@
                     const diskList = document.getElementById('disk-list');
                     diskList.innerHTML = '';
                     
+                    if (disks.length === 0) {
+                        diskList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No disk information available</div></div>';
+                        return;
+                    }
+                    
                     const disks = diskData.disks;
                     const chartData = {
                         labels: [],
@@ -309,14 +608,24 @@
                         if (usePercent > 80) color = '#F44336'; // Rot
                         else if (usePercent > 60) color = '#FFC107'; // Gelb
                         
+                        // Animation delay für staggered effect
+                        diskItem.style.animationDelay = `${index * 0.1}s`;
+                        diskItem.style.animation = 'fadeInUp 0.5s ease forwards';
+                        diskItem.style.opacity = '0';
+                        
                         diskItem.innerHTML = `
                             <div class="disk-header">
-                                <span>${disk.filesystem}</span>
-                                <span>${usePercent.toFixed(1)}%</span>
+                                <span style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 20px;">💿</span>
+                                    <span>${disk.filesystem}</span>
+                                </span>
+                                <span style="background: ${color}20; color: ${color}; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 700;">
+                                    ${usePercent.toFixed(1)}%
+                                </span>
                             </div>
-                            <div class="disk-mount">${disk.mounted_on || ''}</div>
+                            <div class="disk-mount">${disk.mounted_on || 'Not mounted'}</div>
                             <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${usePercent}%; background: ${color};">
+                                <div class="progress-fill" style="width: 0%; background: ${color};" data-percent="${usePercent}">
                                     ${usePercent > 10 ? usePercent.toFixed(1) + '%' : ''}
                                 </div>
                             </div>
@@ -327,7 +636,7 @@
                                 </div>
                                 <div class="stat-item">
                                     <div class="stat-label">Used</div>
-                                    <div class="stat-value">${disk.used}</div>
+                                    <div class="stat-value" style="color: ${color};">${disk.used}</div>
                                 </div>
                                 <div class="stat-item">
                                     <div class="stat-label">Available</div>
@@ -335,6 +644,15 @@
                                 </div>
                             </div>
                         `;
+                        
+                        // Animate progress bar
+                        setTimeout(() => {
+                            const progressFill = diskItem.querySelector('.progress-fill');
+                            if (progressFill) {
+                                const percent = parseFloat(progressFill.getAttribute('data-percent'));
+                                progressFill.style.width = percent + '%';
+                            }
+                        }, index * 100 + 200);
                         diskList.appendChild(diskItem);
                         
                         // Chart Daten sammeln (nur relevante Disks, keine tmpfs/dev)

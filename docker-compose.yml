@@ -20,6 +20,20 @@ services:
       - ./bot/bot.log:/app/bot/bot.log
       # Source Code für Hot Reload (Development)
       - ./bot:/app/bot
+      # Docker Socket - ermöglicht Commands auf dem Host
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # System-Informationen vom Host
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /dev:/host/dev:ro
+      # Root Filesystem für df, disk space etc.
+      - /:/host:ro
+    # Privileged Mode für Host-Zugriff (optional, weniger sicher)
+    # privileged: true
+    # Oder spezifische Capabilities
+    cap_add:
+      - SYS_ADMIN
+      - SYS_TIME
     # Logs direkt anzeigen
     logging:
       driver: "json-file"

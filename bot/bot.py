@@ -153,16 +153,34 @@ if IS_WINDOWS:
         'bot_logs': 'Get-Content bot.log -Tail 20 -ErrorAction SilentlyContinue'
     }
 else:
-    COMMANDS = {
-        'host_info': 'hostname && hostname -I',
-        'system_info': 'echo "=== System Info ===" && uname -a && echo "" && echo "Uptime:" && uptime -p 2>/dev/null || uptime && echo "" && echo "CPU:" && lscpu | grep "Model name" 2>/dev/null || echo "CPU: N/A" && echo "Memory:" && free -h | head -2',
-        'disk_space': 'df -h',
-        'uptime': 'uptime',
-        'processes': 'ps aux --sort=-%cpu | head -15',
-        'temp': 'sensors 2>/dev/null || echo "sensors not available"',
-        'memory': 'free -h',
-        'bot_logs': 'tail -20 /app/bot/bot.log 2>/dev/null || tail -20 bot.log 2>/dev/null || echo "No log file found. Bot is running in Docker. Use: docker-compose logs bot"'
-    }
+    # Prüfe ob wir im Container sind und Host-Zugriff haben
+    IN_CONTAINER = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER')
+    HOST_MOUNTED = os.path.exists('/host/proc') or os.path.exists('/host')
+    
+    if IN_CONTAINER and HOST_MOUNTED:
+        # Commands auf dem Host ausführen über gemountete Pfade
+        COMMANDS = {
+            'host_info': 'cat /host/etc/hostname 2>/dev/null || hostname && hostname -I',
+            'system_info': 'echo "=== System Info ===" && cat /host/proc/version && echo "" && echo "Uptime:" && cat /host/proc/uptime | awk "{print int($1/86400)\" days, \"int(($1%86400)/3600)\" hours\"}" && echo "" && echo "CPU:" && grep "model name" /host/proc/cpuinfo | head -1 | cut -d: -f2 && echo "Memory:" && free -h | head -2',
+            'disk_space': 'df -h /host 2>/dev/null || df -h',
+            'uptime': 'cat /host/proc/uptime | awk "{d=int($1/86400); h=int(($1%86400)/3600); m=int(($1%3600)/60); print d\" days, \"h\" hours, \"m\" minutes\"}"',
+            'processes': 'ps aux --sort=-%cpu | head -15 || cat /host/proc/loadavg',
+            'temp': 'sensors 2>/dev/null || echo "sensors not available"',
+            'memory': 'free -h || cat /host/proc/meminfo | head -5',
+            'bot_logs': 'tail -20 /app/bot/bot.log 2>/dev/null || tail -20 bot.log 2>/dev/null || echo "No log file found. Bot is running in Docker. Use: docker-compose logs bot"'
+        }
+    else:
+        # Normale Commands (direkt im Container oder auf Host)
+        COMMANDS = {
+            'host_info': 'hostname && hostname -I',
+            'system_info': 'echo "=== System Info ===" && uname -a && echo "" && echo "Uptime:" && uptime -p 2>/dev/null || uptime && echo "" && echo "CPU:" && lscpu | grep "Model name" 2>/dev/null || echo "CPU: N/A" && echo "Memory:" && free -h | head -2',
+            'disk_space': 'df -h',
+            'uptime': 'uptime',
+            'processes': 'ps aux --sort=-%cpu | head -15',
+            'temp': 'sensors 2>/dev/null || echo "sensors not available"',
+            'memory': 'free -h',
+            'bot_logs': 'tail -20 /app/bot/bot.log 2>/dev/null || tail -20 bot.log 2>/dev/null || echo "No log file found. Bot is running in Docker. Use: docker-compose logs bot"'
+        }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler für /start Command"""
@@ -312,7 +330,15 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Spezielle Behandlung für disk_space: JSON für WebApp, Text für Telegram
         if cmd_key == 'disk_space' and output:
             try:
-                disks = parse_disk_space(output)
+                # Filtere Container-spezifische Mounts heraus, wenn wir auf Host zugreifen
+                filtered_output = output
+                if os.path.exists('/host/proc'):
+                    # Entferne Container-Mounts aus der Ausgabe
+                    lines = filtered_output.split('\n')
+                    filtered_lines = [line for line in lines if not any(x in line for x in ['overlay', 'tmpfs', '/dev/shm', '/proc/', '/sys/'])]
+                    filtered_output = '\n'.join(filtered_lines)
+                
+                disks = parse_disk_space(filtered_output)
                 # Sende JSON-Daten für WebApp (wird in der App gerendert)
                 json_data = json.dumps({'type': 'disk_space', 'disks': disks}, indent=2)
                 
